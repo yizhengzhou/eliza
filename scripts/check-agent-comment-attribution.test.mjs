@@ -33,6 +33,37 @@ Attribution status: self-reported
 <!-- eliza-computer-attribution:v1 ${JSON.stringify(marker)} -->`;
 }
 
+function receiptFooter(overrides = {}) {
+  const values = {
+    provider: "openai",
+    model: "gpt-5.6-sol",
+    client: "codex",
+    lane: "qa-agent",
+    skillRevision:
+      "elizaOS/army@0123456789abcdef0123456789abcdef01234567:skills/contribute-to-eliza",
+    ...overrides,
+  };
+  const marker = {
+    provider: values.provider,
+    model: values.model,
+    client: values.client,
+    skill_revision: values.skillRevision,
+    run: {
+      schema_version: "1",
+      run_id: "run-1",
+      signature_algorithm: "ed25519",
+      device_signature: "signature",
+    },
+  };
+  return `AI provider/model: ${values.provider} / ${values.model}
+Client / agent tooling: ${values.client}
+Contribution skill revision: ${values.skillRevision}
+Compute receipt: 42 project-attributed tokens (bounded; device-signed, locally reported)
+Attribution status: self-reported
+— [${values.lane}]
+<!-- elizaos-contribution-attribution:v2 ${JSON.stringify(marker)} -->`;
+}
+
 function workflowMachineFooter(path) {
   const workflow = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
   const matches = [
@@ -73,6 +104,36 @@ function filledHumanIssueTemplate(path, noun) {
 }
 
 describe("agent comment attribution", () => {
+  it("accepts the signed v2 receipt footer emitted by the contribution skill", () => {
+    const result = evaluateCommentAttribution(receiptFooter(), {
+      required: true,
+    });
+    assert.equal(
+      result.ok,
+      true,
+      result.findings.map((finding) => finding.message).join("; "),
+    );
+  });
+
+  it("rejects malformed or mixed v2 receipt markers", () => {
+    const malformed = evaluateCommentAttribution(
+      receiptFooter().replace(
+        '"signature_algorithm":"ed25519"',
+        '"signature_algorithm":"unexpected"',
+      ),
+      { required: true },
+    );
+    assert.equal(malformed.ok, false);
+    assert.ok(malformed.findings.some((finding) => finding.id === "marker-receipt"));
+
+    const duplicate = evaluateCommentAttribution(
+      `${receiptFooter()}\n${machineFooter()}`,
+      { required: true },
+    );
+    assert.equal(duplicate.ok, false);
+    assert.ok(duplicate.findings.some((finding) => finding.id === "marker"));
+  });
+
   it("accepts an exact nested model identifier on a claim", () => {
     const result = evaluateCommentAttribution(
       `CLAIMING REVIEW: verify the data boundary\n\n${machineFooter()}`,

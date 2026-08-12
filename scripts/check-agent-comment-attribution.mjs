@@ -13,7 +13,7 @@ const CLAIM_LINE_RE = /^CLAIMING(?:\s+(?:REVIEW|LEVER))?\s*:/i;
 const ATTRIBUTION_DECLARATION_RE =
   /^(?:AI provider\/model\s*:|AI assistance\s*:\s*yes\b|Models?(?:\s+used)?\s*:|Model\(s\)\s+used\s*:|Client\s*\/\s*agent tooling\s*:|Contribution skill revision\s*:)/i;
 const ATTRIBUTION_MARKER_LINE_RE =
-  /^<!--\s*eliza-computer-attribution:v1\b[^\r\n]*-->\s*$/i;
+  /^<!--\s*(?:eliza-computer-attribution:v1|elizaos-contribution-attribution:v2)\b[^\r\n]*-->\s*$/i;
 const HUMAN_ONLY_FOOTER_RE =
   /(?:^|\n)AI assistance:\s*no\s*[-\u2013\u2014]\s*human-only (?:claim|comment|review)\s*\nAttribution status:\s*self-reported\s*$/i;
 const NO_AI_VALUE_RE = /^(?:no|none|n\/?a)\s*[-:\u2013\u2014]\s*(\S[\s\S]*?)$/i;
@@ -120,18 +120,19 @@ function markerRecords(source) {
     .map((record) => {
       const raw = record.raw.trim();
       const any = raw.match(
-        /^<!--\s*eliza-computer-attribution:v1\b([\s\S]*?)-->\s*$/i,
+        /^<!--\s*(eliza-computer-attribution:v1|elizaos-contribution-attribution:v2)\b([\s\S]*?)-->\s*$/i,
       );
       if (!any) return null;
       const wellFormed = raw.match(
-        /^<!--\s*eliza-computer-attribution:v1\s+(\{[^\r\n]*\})\s*-->\s*$/i,
+        /^<!--\s*(eliza-computer-attribution:v1|elizaos-contribution-attribution:v2)\s+(\{[^\r\n]*\})\s*-->\s*$/i,
       );
       const leadingWhitespace =
         record.raw.length - record.raw.trimStart().length;
       return {
         end: record.start + leadingWhitespace + raw.length,
-        json: wellFormed?.[1] ?? null,
+        json: wellFormed?.[2] ?? null,
         start: record.start + leadingWhitespace,
+        version: wellFormed?.[1]?.endsWith(":v2") ? 2 : 1,
       };
     })
     .filter((record) => record !== null);
@@ -388,7 +389,7 @@ export function evaluateCommentAttribution(body, options = {}) {
     findings.push({
       id: "marker",
       message:
-        "Exactly one well-formed eliza-computer-attribution:v1 JSON marker must appear.",
+        "Exactly one well-formed v1 attribution or v2 contribution-receipt JSON marker must appear.",
     });
   }
 
@@ -477,13 +478,31 @@ export function evaluateCommentAttribution(body, options = {}) {
 
   if (marker && typeof marker === "object" && !Array.isArray(marker)) {
     const expectedKeys = ["client", "model", "provider", "skill_revision"];
-    if (
-      Object.keys(marker).sort().join(",") !== expectedKeys.sort().join(",")
-    ) {
+    const receiptKeys = [...expectedKeys, "run"];
+    const requiredKeys = markerMatch?.version === 2 ? receiptKeys : expectedKeys;
+    if (Object.keys(marker).sort().join(",") !== requiredKeys.sort().join(",")) {
       findings.push({
         id: "marker-fields",
         message:
-          "The attribution marker must contain only provider, model, client, and skill_revision.",
+          markerMatch?.version === 2
+            ? "The v2 receipt marker must contain provider, model, client, skill_revision, and run."
+            : "The attribution marker must contain only provider, model, client, and skill_revision.",
+      });
+    }
+    if (
+      markerMatch?.version === 2 &&
+      (typeof marker.run !== "object" ||
+        marker.run === null ||
+        Array.isArray(marker.run) ||
+        marker.run.schema_version !== "1" ||
+        marker.run.signature_algorithm !== "ed25519" ||
+        typeof marker.run.device_signature !== "string" ||
+        marker.run.device_signature.length === 0)
+    ) {
+      findings.push({
+        id: "marker-receipt",
+        message:
+          "The v2 marker must carry a schema-1 Ed25519 run with a device signature.",
       });
     }
     if (marker.provider !== providerSlug(provider)) {

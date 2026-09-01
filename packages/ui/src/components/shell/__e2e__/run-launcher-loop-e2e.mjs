@@ -110,8 +110,8 @@ async function clearGeneratedArtifacts() {
 await clearGeneratedArtifacts();
 
 // ── Bundle the fixture (identical stub set to run-home-screen-e2e). The launcher
-// curation drives real developer/preview gating, so the @elizaos/core stub must
-// export the genuine view-kind helpers as OWN enumerable keys (esbuild's __toESM
+// curation drives real role and developer/preview gating, so the @elizaos/core
+// stub must export those helpers as OWN enumerable keys (esbuild's __toESM
 // interop only copies own keys onto the ESM namespace — a value reachable only
 // through the Proxy `get` trap reads back undefined). ─────────────────────────
 const stubResolver = {
@@ -212,6 +212,10 @@ const stubElizaCore = {
           {
             ElizaError,
             isElizaError: (v) => v instanceof ElizaError,
+            roleRank: (role) =>
+              ({ NONE: 0, GUEST: 1, USER: 2, MEMBER: 2, ADMIN: 3, OWNER: 4 })[
+                String(role).trim().toUpperCase()
+              ] ?? 0,
             resolveViewKind,
             isViewKindEnabled,
             isViewVisible: (d, enabled) =>
